@@ -1,0 +1,20 @@
+{application, nasoc,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { nasoc_app, []}},
+  {env, [
+      %% internal IP - for internal network
+      {internal_ip, {0,0,0,0}},
+      %% internal port - for incoming connections from internal network	
+      {internal_port, 1080},
+      %% external IP 
+      {external_ip, {0,0,0,0}}
+      
+  ]}
+ ]}.
