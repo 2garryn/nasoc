@@ -141,7 +141,7 @@ client_msg(connected, <<?PROTO_VER5:8, MethNumber:8, ReqMethods/binary>>,
 	false -> 
 	    ?INFO("[client ~p] no acceptable methods for client. Close connection...", 
 		  [CliPort]),
-	    socket_send(CliSocket, <<?PROTO_VER5, ?NO_AUTH>>),
+	    socket_send(CliSocket, <<?PROTO_VER5, ?NO_ACPT_METHODS>>),
 	    exit(normal)
     end;
 
@@ -187,6 +187,13 @@ client_msg(await_cmd, <<?PROTO_VER5:8, UnsupCmd:8, Tail/binary>>,
 	   [CliPort, UnsupCmd]),
     socket_send(CliSocket, <<?PROTO_VER5, ?CMD_NOT_SUPPORTED, Tail/binary>>),
     exit(normal);
+
+client_msg(FsmState, Binary, State) when FsmState == await_cmd;
+					 FsmState == connected ->
+    ?ERROR("[client ~p] sends wrong message during neg-ns ~p",
+	   [State#state.cli_ip_port, erlang:binary_part(Binary, 0, 20)]), 
+    exit(normal);
+    
 
 %% @hidden
 %% Get proxy message. send it to target
