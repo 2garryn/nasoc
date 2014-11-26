@@ -1,7 +1,7 @@
 nasoc
 =====
 
-Simple SOCKS5 Proxy on erlang
+Simple SOCKS5 Proxy in erlang
 
 What is done:
 -------------
@@ -17,7 +17,8 @@ TODO:
 
 * UDP_ASSOCIATE is not supported.
 
-* Unit tests should be added
+* Fail cases to unit tests
+
 * Additional auth. methods like user/password with LDAP and etc
 
 Configuration:
