@@ -11,6 +11,8 @@ What is done:
 
 * BIND command to open connections from external side of proxy (NOT TESTED). Do you know software which uses multiple connections over socks proxy?
 
+* Riak as statistic storage added. Now you can't disable statistic collecting 
+
 TODO:
 ------------
 * Ipv6 is not supported now.
