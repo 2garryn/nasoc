@@ -52,7 +52,7 @@
 	  %% ip of target
 	  tg_ip    :: inet:ip_address(),
 	  %% traffic counter in bytes
-	  inc_traffic :: non_neg_integer(),
+	  inc_traffic :: non_neg_integer()
 	 }).
 
 %%%===============================================================================

@@ -86,6 +86,7 @@ loop(Fsm, State = #state{parent = Parent, tr_counter = TrCounter}) ->
 	    set_active(CliSocket, once),
 	    {ok, PidTrCounter} = 
 		nasoc_traffic_counter:start_counter(self(), Ip, Port),
+	    _Ref = erlang:monitor(process, PidTrCounter),
 	    loop(Fsm, State#state{cli_ip_port = IpPort, 
 				  tr_counter = PidTrCounter});
 	{'DOWN', Parent, process, _Object, _Reason} ->
