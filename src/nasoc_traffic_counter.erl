@@ -142,6 +142,7 @@ export(ClientIp) ->
 %% Init callback.
 init([ConnPid, ClientIp, ClientPort]) ->
     Ref = erlang:monitor(process, ConnPid),
+    ?COUNTER:add_client(ClientIp),
     {ok, #state{conn_ref = Ref, cl_ip = ClientIp, 
 		cl_port = ClientPort, inc_traffic = 0}}.
 
@@ -153,9 +154,8 @@ handle_call(_Request, _From, State) ->
 
 %% @hidden
 %% gen_server:cast/2 callback
-handle_cast({target, Ip}, State = #state{cl_ip = ClIp}) ->
+handle_cast({target, Ip}, State) ->
     NewState = State#state{tg_ip = Ip},
-    ?COUNTER:add_target(ClIp, Ip),
     {noreply, NewState};
 
 handle_cast({inc_counter, MsgSize}, State = #state{inc_traffic = IncTr}) ->

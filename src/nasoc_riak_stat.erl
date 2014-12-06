@@ -12,7 +12,7 @@
 -include("nasoc.hrl").
 
 %% API
--export([add_target/2, inc_counter/4,
+-export([add_client/1, inc_counter/4,
 	count/1]).
 
 %%% Bucket where set of all clients is stored
@@ -27,6 +27,7 @@
 %%% Prefix for client ip bucket
 -define(NASOC_BUCKET_PREFIX, <<"nasoc_app_client_">>).
 
+%% R + W > N - strong consistency
 -define(N_VAL, 5).
 
 -define(R, 3).
@@ -48,7 +49,7 @@
 %%%          gb_sets:set(client_ip()) - converted to binary
 %%% ------------------------------------------------------------------
 %%% 
-%%% client_ip_bin() ->
+%%% ?NASOC_BUCKET_PREFIX_client_ip_bin() ->
 %%%     nasoc_targets_keys_key ->
 %%%        gb_sets:set(target_ip()) - converted to binary
 %%%     target_ip_bin() ->
@@ -61,15 +62,15 @@
 %%%===============================================================================
 
 %%--------------------------------------------------------------------------------
--spec add_target( ClientIp :: client_ip(), TargetIp :: target_ip()) 
-		-> ok | {ok, term()} | {error, notfound}.
+-spec add_client( ClientIp :: client_ip()) -> ok.
 %%--------------------------------------------------------------------------------
 %% @doc 
-%%   Add target for client to riak. raise exception if riak error happened (except not found)
+%%   Add client to list of clients. 
+%%   raise exception if riak error happened (except not found)
 %% @end
 %%--------------------------------------------------------------------------------
-add_target(ClientIp, TargetIp) ->
-    Fun = fun(Pid) -> add_target_fun(Pid, ClientIp, TargetIp) end,
+add_client(ClientIp) ->
+    Fun = fun(Pid) -> add_client_fun(Pid, ClientIp) end,
     safe_exec(Fun, ClientIp).
 
 
@@ -140,15 +141,13 @@ safe_exec(Fun, ClientIp) ->
 %% Try to get set of all clients connected ever
 %% Add new client to this set. 
 %% In case of siblings we can merge many sets without incosistency
-add_target_fun(Pid, ClientIp, TargetIp) ->
+add_client_fun(Pid, ClientIp) ->
     case riak_get(Pid, ?ALL_CLIENTS_BUCKET, ?ALL_CLIENTS_KEY) of 
 	{ok, ValueObj} ->
-	    add_to_sets(Pid, ClientIp, ValueObj),
-	    add_target_to_client(Pid, ClientIp, TargetIp);
+	    add_to_sets(Pid, ClientIp, ValueObj);
 	{error, notfound} ->
 	    create_set(Pid, ?ALL_CLIENTS_BUCKET, 
-			 ?ALL_CLIENTS_KEY, ClientIp),
-	    add_target_to_client(Pid, ClientIp, TargetIp);
+			 ?ALL_CLIENTS_KEY, ClientIp);
 	{error, Reason}  ->
 	    ?ERROR("[client ip ~p] Riak get error ~p close connection now!",
 		   [ClientIp, Reason]),
@@ -159,11 +158,13 @@ add_target_fun(Pid, ClientIp, TargetIp) ->
 %% @hidden 
 %% increment or create traffic for client ip <-> target ip pair
 inc_counter_fun(Pid, ClientIp, ClientPort, TargetIp, IncTraff) ->
-    case riak_get(Pid, ip_to_bucket(ClientIp), to_bin(TargetIp)) of 
+    BinClientIp = ip_to_bucket(ClientIp),
+    add_target_to_client(Pid, BinClientIp, TargetIp),
+    case riak_get(Pid, BinClientIp, to_bin(TargetIp)) of 
 	{ok, ValueObj} ->
 	    increment_traffic_counters(Pid, ValueObj, ClientPort, IncTraff);
 	{error, notfound} ->
-	    create_traffic_counters(Pid, ClientIp, TargetIp, ClientIp, ClientPort, IncTraff);
+	    create_traffic_counters(Pid, BinClientIp, TargetIp, ClientPort, IncTraff);
 	{error, Reason} ->
 	    ?ERROR("[client ip ~p] Riak error get ~p close connection now!",
 		   [ClientIp, Reason]),
@@ -187,8 +188,7 @@ count_fun(Pid, ClientIp) ->
 
 %% @hidden
 %% Add target to client targets set
-add_target_to_client(Pid, ClientIp, TargetIp) ->
-    BinClientIp = ip_to_bucket(ClientIp),
+add_target_to_client(Pid, BinClientIp, TargetIp) ->
     case riak_get(Pid, BinClientIp, ?TARGETS_IN_CLIENT_BUCKET) of 
 	{ok, ValueObj} ->
 	    add_to_sets(Pid, TargetIp, ValueObj);
@@ -196,8 +196,8 @@ add_target_to_client(Pid, ClientIp, TargetIp) ->
 	    create_set(Pid, BinClientIp, ?TARGETS_IN_CLIENT_BUCKET, TargetIp); 
 	{error, Reason} ->
 	    ?ERROR("[client ip ~p] Riak error get ~p close connection now!",
-		   [ClientIp, Reason]),
-	    exit({riak_error, ClientIp, Reason})
+		   [Reason]),
+	    exit({riak_error,  Reason})
     end.
 
 
@@ -205,8 +205,7 @@ add_target_to_client(Pid, ClientIp, TargetIp) ->
 %% Create gb_trees:tree(client_port(), non_neg_integer())
 %% Key of tree is client port number
 %% Value of tree is number of bytes
-create_traffic_counters(Pid, ClientIp, TargetIp, ClientIp, ClientPort, IncTraff) ->
-    BinClientIp = ip_to_bucket(ClientIp),
+create_traffic_counters(Pid, BinClientIp, TargetIp, ClientPort, IncTraff) ->
     ok = riakc_pb_socket:set_bucket(Pid, BinClientIp, 
 				    [{n_val, ?N_VAL}, 
 				     {allow_mult, true}]),
