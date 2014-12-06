@@ -37,7 +37,7 @@ Proxy traffic statistic stored in Riak(CRDT):
 ------------
 
 Before usage of proxy you should execute __create_riak_crdt.sh__. It creates need CRDT date types (maps and sets) in your riak installation.
-Nasoc creates two backets due its work, named __nasoc_app_crdt_all_clients_bkt__ and __nasoc_app_crdt_client_to_target_map_bkt__.I strongly recommended not to use this buckets for other appliations.
+Nasoc creates two backets due its work, named __nasoc_app_crdt_all_clients_bkt__ and __nasoc_app_crdt_client_to_target_map_bkt__.I strongly recommended not to use these buckets for other appliations.
 
 To get all client ips, connected to nasoc, use following function:
 ```erlang
