@@ -28,6 +28,8 @@
 	  ext_ip_port         :: {inet:ip_address(), inet:port_number()},
 	  %% ip and port of target. (external server side)
 	  target_ip_port      :: {inet:ip_address(), inet:port_number()},
+
+	  tr_counter          :: pid(),
 	  %% listener pid
 	  parent              :: reference()}).
 
@@ -76,16 +78,20 @@ init_loop(ParentPid, CliSocket) ->
 %%%-------------------------------------------------------------------
 %% Main loop on getting messages
 %%%-------------------------------------------------------------------
-loop(Fsm, State = #state{parent = Parent}) ->
+loop(Fsm, State = #state{parent = Parent, tr_counter = TrCounter}) ->
     receive 
 	set_ctrl ->
 	    CliSocket = State#state.cli_socket,
-	    {ok, {_Ip, _Port} = IpPort} = inet:peername(CliSocket),
+	    {ok, {Ip, Port} = IpPort} = inet:peername(CliSocket),
 	    set_active(CliSocket, once),
-	    loop(Fsm, State#state{cli_ip_port = IpPort});
-	{'DOWN', Parent, process, _Object, Reason} ->
-	    ?ERROR("Listener has been stopped ~p", [Reason]),
-	    exit(normal);
+	    {ok, PidTrCounter} = 
+		nasoc_traffic_counter:start_counter(self(), Ip, Port),
+	    loop(Fsm, State#state{cli_ip_port = IpPort, 
+				  tr_counter = PidTrCounter});
+	{'DOWN', Parent, process, _Object, _Reason} ->
+	    exit(listener_stopped);
+	{'DOWN', _TrRef, process, TrCounter, _Reason} ->
+	    exit(counter_stopped);
 	Message ->
 	    {NewFsm, NewState} = process(Message, Fsm, State),
 	    loop(NewFsm, NewState)
@@ -102,8 +108,8 @@ socket_send(Socket, Message) ->
 	    ok;
 	{error, Reason} ->
 	    ?ERROR("Error to send message to ~p message length ~p reason ",
-		   [{Socket, inet:peername(Socket)}, length(Message), Reason]),
-	    exit(normal)
+		   [{Socket, inet:peername(Socket)}, byte_size(Message), Reason]),
+	    exit({socket_send_error, Reason})
     end.
 
 %% helper to route messages
@@ -123,7 +129,11 @@ process({tcp_error, Socket, Reason}, Fsm, State = #state{cli_socket = Socket}) -
     client_error(Fsm, Reason, State);
 
 process({tcp_error, Socket, Reason}, Fsm, State = #state{ext_socket = Socket}) ->
-    target_error(Fsm, Reason, State).
+    target_error(Fsm, Reason, State);
+
+process(WrongMessage, Fsm, State) ->
+    ?WARNING("Wrong message ~p", [WrongMessage]),
+    {Fsm, State}.
 
 
 %% @hidden
@@ -142,7 +152,7 @@ client_msg(connected, <<?PROTO_VER5:8, MethNumber:8, ReqMethods/binary>>,
 	    ?INFO("[client ~p] no acceptable methods for client. Close connection...", 
 		  [CliPort]),
 	    socket_send(CliSocket, <<?PROTO_VER5, ?NO_ACPT_METHODS>>),
-	    exit(normal)
+	    exit(wrong_clients_methods)
     end;
 
 %% @hidden
@@ -159,7 +169,7 @@ client_msg(await_cmd, <<?PROTO_VER5:8, ?CMD_CONNECT:8, ?RSV:8, AType:8, AddrPort
 		   "Error: ~p close connection ",
 		   [CliPort, atype_to_atom(AType), Reason]),
 	    socket_send(CliSocket, <<?PROTO_VER5, BinReply, ?RSV, AType, AddrPort/binary>>),
-	    exit(normal)
+	    exit(unsup_address)
     end;
 
 %% @hidden
@@ -176,7 +186,7 @@ client_msg(await_cmd, <<?PROTO_VER5:8, ?CMD_BIND:8, ?RSV:8, AType:8, AddrPort/bi
 		   "Error: ~p close connection ",
 		   [CliPort, atype_to_atom(AType), Reason]),
 	    socket_send(CliSocket, <<?PROTO_VER5, BinReply, ?RSV, AType, AddrPort/binary>>),
-	    exit(normal)
+	    exit(unsup_address)
     end;
 
 %% @hidden
@@ -186,13 +196,13 @@ client_msg(await_cmd, <<?PROTO_VER5:8, UnsupCmd:8, Tail/binary>>,
     ?ERROR("[client ~p] wants to use UNsupported command ~p",
 	   [CliPort, UnsupCmd]),
     socket_send(CliSocket, <<?PROTO_VER5, ?CMD_NOT_SUPPORTED, Tail/binary>>),
-    exit(normal);
+    exit(unsup_command);
 
 client_msg(FsmState, Binary, State) when FsmState == await_cmd;
 					 FsmState == connected ->
     ?ERROR("[client ~p] sends wrong message during neg-ns ~p",
 	   [State#state.cli_ip_port, erlang:binary_part(Binary, 0, 20)]), 
-    exit(normal);
+    exit(wrong_neg_message);
     
 
 %% @hidden
@@ -203,21 +213,20 @@ client_msg(await_msg, Binary, State) ->
 
 %% @hidden
 %% Get proxy message. send it to client
-target_msg(await_msg, Binary, State) ->
+target_msg(await_msg, Binary, State = #state{tr_counter = TrCounter}) ->
+    nasoc_traffic_counter:inc_counter(TrCounter, byte_size(Binary)),
     socket_send(State#state.cli_socket, Binary),
     {await_msg, State}.
+
     
 %% @hidden
 %% Something goes wrong. Close all sockets
-client_close(_Fsm, #state{cli_ip_port = CliPort, target_ip_port = TipPort}) ->
-    ?INFO("[client ~p] close connection. Disconnetcting from ~p",[CliPort, TipPort]),
+client_close(_Fsm, _State) ->
     exit(normal).
 
 %% @hidden
 %% Something goes wrong. Close all sockets
-target_close(_Fsm, #state{cli_ip_port = CliPort, target_ip_port = TipPort}) ->
-    ?INFO("[client ~p] Target ~p close connection. Disconnecting from client...",
-	  [CliPort, TipPort]),
+target_close(_Fsm, _State) ->
     exit(normal).
 	    
 %% @hidden
@@ -225,14 +234,14 @@ target_close(_Fsm, #state{cli_ip_port = CliPort, target_ip_port = TipPort}) ->
 client_error(_Fsm, Reason, #state{cli_ip_port = CliPort,
 				  target_ip_port = TipPort}) ->
     ?ERROR("[client ~p] Client error ~p. Target: ~p", [CliPort, Reason, TipPort]),
-    exit(normal).
+    exit({client_error, Reason}).
 
 %% @hidden
 %% Target TCP error. Stop process and close sockets automatically
 target_error(_Fsm, Reason, #state{cli_ip_port = CliPort,
 				  target_ip_port = TipPort}) ->
     ?ERROR("[client ~p] Target error ~p. Target: ~p", [CliPort, Reason, TipPort]),
-    exit(normal).
+    exit({target_socket_error, Reason}).
 
 %% @hidden
 %% Check that we support client's methods
@@ -274,6 +283,7 @@ process_connect({ok, ExtSocket}, Addr, Port, _AType, State) ->
 			   target_ip_port = {Addr, Port}},
     send_cmd_reply(ExtIp, ExtPort, ?ATYPE_IPV4, ?CMD_SUCCESS, State#state.cli_socket),
     set_active(State#state.cli_socket, true),
+    nasoc_traffic_counter:target(NewState#state.tr_counter, Addr),
     {await_msg, NewState};
 
 %% @hidden
@@ -283,7 +293,7 @@ process_connect({error, Error}, Addr, Port, AType, State) ->
 	   [State#state.cli_ip_port, {Addr, Port}, Error]),
     BinError = error_to_bin(Error),
     send_cmd_reply(Addr, Port, AType, BinError, State#state.cli_socket),
-    exit(normal).
+    exit({connect_to_target_error, Error}).
 
 
 error_to_bin(enetunreach) -> ?NETWORK_UNREACH;
@@ -330,12 +340,12 @@ bind_for_target(Addr, Port, ?ATYPE_DOMAIN,
 	    ?ERROR("[client ~p] wants bind on not exist server ip ~p domainname ~p port ~p",
 		   [State#state.cli_ip_port, OtherIp, Addr, Port]),
 	    send_cmd_reply(Addr, Port, ?ATYPE_DOMAIN, ?ANY_OTHER_ERROR, CliSocket),
-	    exit(normal);
+	    exit(bind_to_wrong_server);
 	{error, Reason} ->
 	    ?ERROR("[client ~p] wants bind on not resolved domainname ~p port ~p reason ~p",
 		   [State#state.cli_ip_port, Addr, Port, Reason]),
 	    send_cmd_reply(Addr, Port, ?ATYPE_DOMAIN, ?ANY_OTHER_ERROR, CliSocket),
-	    exit(normal)
+	    exit(bind_to_unres_hostname)
     end;
 
 %% @hidden
@@ -357,18 +367,19 @@ bind_for_target(Addr, Port, ?ATYPE_IPV4,
 	    NewState = State#state{ ext_socket = ConSocket, 
 				    ext_ip_port = {Addr, AssignedPort}, 
 				    target_ip_port = {RemAddr, RemPort}},
+	    nasoc_traffic_counter:target(NewState#state.tr_counter, {RemAddr, RemPort}),
 	    {await_msg, NewState};
 	{error, timeout} ->
 	    send_cmd_reply(Addr, Port, ?ATYPE_IPV4, 
 			   ?TTL_EXPIRED, CliSocket),
-	    exit(normal);
+	    exit(timeout);
 	 {error, Reason} ->	
 	    ?ERROR("[client ~p] Server can't accept incoming connection"
 		   " to ~p port ~p due internal error ~p",
 		   [State#state.cli_ip_port, Addr, Port, Reason]),
 	    send_cmd_reply(Addr, Port, ?ATYPE_IPV4, 
 			   ?INTERNAL_ERROR, CliSocket),
-	    exit(normal)
+	    exit({bind_accept_error, Reason})
     end.
 
 
@@ -386,7 +397,7 @@ set_listen(Addr, Port, State) ->
 		   [State#state.cli_ip_port, Addr, Port, Reason]),
 	    send_cmd_reply(Addr, Port, ?ATYPE_IPV4, 
 			   ?INTERNAL_ERROR, State#state.cli_socket),
-	    exit(normal)
+	    exit({set_listen_error, Reason})
     end.
 
 %% @hidden
