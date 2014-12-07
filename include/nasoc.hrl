@@ -17,8 +17,8 @@
 
 -type client_port() :: inet:port_number().
 
-%% result of term_to_binary(client_ip())
+%% binary view of client IP with prefix
 -type client_ip_bin() :: binary().
 
-%% result of term_to_binary(target_ip())
+%% binary view of target IP with prefix
 -type target_ip_bin() :: binary().
