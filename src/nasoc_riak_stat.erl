@@ -3,8 +3,6 @@
 %%% @copyright (C) 2014
 %%% @doc
 %%%     Riak handler and siblings resolver for statistic.
-%%% TODO:
-%%%     add prefix to nasoc buckets.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(nasoc_riak_stat).
