@@ -3,12 +3,13 @@
 %%% @copyright (C) 2014
 %%%-------------------------------------------------------------------
 
-%% TODO: add logger to file 
--define(INFO, error_logger:info_msg).
+-compile([{parse_transform, lager_transform}]).
 
--define(ERROR, error_logger:error_msg).
+-define(INFO, lager:info).
 
--define(WARNING, error_logger:warning_msg).
+-define(ERROR, lager:error).
+
+-define(WARNING, lager:warning).
 
 -type target_ip() :: inet:ip_address().
 

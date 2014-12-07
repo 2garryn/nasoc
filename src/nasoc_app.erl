@@ -17,6 +17,7 @@
 %% Application callbacks
 %% ===================================================================
 start() ->
+    lager:start(),
     ensure_started(riakpool),
     ok = application:load(nasoc),
     Host = get_config(riak_host),
@@ -30,6 +31,7 @@ start(_StartType, _StartArgs) ->
 stop(_State) ->
     application:stop(nasoc),
     application:stop(riakpool),
+    application:stop(lager),
     ok.
 
 get_config(Config) ->

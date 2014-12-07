@@ -108,7 +108,7 @@ socket_send(Socket, Message) ->
 	ok -> 
 	    ok;
 	{error, Reason} ->
-	    ?ERROR("Error to send message to ~p message length ~p reason ",
+	    ?ERROR("Error to send message to ~p message length ~p reason ~p",
 		   [{Socket, inet:peername(Socket)}, byte_size(Message), Reason]),
 	    exit({socket_send_error, Reason})
     end.

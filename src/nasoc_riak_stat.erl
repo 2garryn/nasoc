@@ -13,7 +13,7 @@
 
 %% API
 -export([add_client/1, inc_counter/4,
-	count/1]).
+	count/1, list_clients/0]).
 
 %%% Bucket where set of all clients is stored
 -define(ALL_CLIENTS_BUCKET, <<"nasoc_app_all_clients_bkt">>).
@@ -71,7 +71,7 @@
 %%--------------------------------------------------------------------------------
 add_client(ClientIp) ->
     Fun = fun(Pid) -> add_client_fun(Pid, ClientIp) end,
-    safe_exec(Fun, ClientIp).
+    safe_exec(Fun).
 
 
 %%--------------------------------------------------------------------------------
@@ -93,13 +93,12 @@ inc_counter(ClientIp, ClientPort, TargetIp, IncTraff) ->
 		  inc_counter_fun(Pid, ClientIp, ClientPort, 
 					 TargetIp, IncTraff) 
 	  end,
-    safe_exec(Fun, ClientIp).  
+    safe_exec(Fun).  
 
 
 %%--------------------------------------------------------------------------------
 -spec count( ClientIp :: client_ip() ) 
--> {ok, {client_ip(), 
-	 [{target_ip(), non_neg_integer()}]}} | {error, notfound}.
+-> {ok, [{target_ip(), non_neg_integer()}]} | {error, notfound}.
 %%--------------------------------------------------------------------------------
 %% @doc 
 %%   Count incoming traffic for client. 
@@ -108,8 +107,19 @@ inc_counter(ClientIp, ClientPort, TargetIp, IncTraff) ->
 %%--------------------------------------------------------------------------------
 count(ClientIp) ->
     Fun = fun(Pid) -> count_fun(Pid, ClientIp) end,
-    safe_exec(Fun, ClientIp).
+    safe_exec(Fun).
 		
+%%--------------------------------------------------------------------------------
+-spec list_clients() -> {ok, [client_ip()]} | {error, notfound}.
+%%--------------------------------------------------------------------------------
+%% @doc 
+%%   List call clients connected to proxy ever.
+%%   Raise exception if riak error happened (except not found)
+%% @end
+%%--------------------------------------------------------------------------------
+list_clients() ->
+    Fun = fun(Pid) -> list_clients_fun(Pid) end,
+    safe_exec(Fun).
 
 %%%===============================================================================
 %%% Internal functions
@@ -117,7 +127,7 @@ count(ClientIp) ->
 
 %% @hidden 
 %% Execute fun in riak pool
-safe_exec(Fun, ClientIp) ->
+safe_exec(Fun) ->
     case riakpool:execute(Fun) of 
 	{ok, ok} -> 
 	    ok;
@@ -127,11 +137,11 @@ safe_exec(Fun, ClientIp) ->
 	    {error, notfound};
 	{ok, Something} ->
 	    Stacktrace = erlang:get_stacktrace(),
-	    ?ERROR("[client ip ~p ] Riak error ~p ~p", [ClientIp, Something, Stacktrace]),
+	    ?ERROR("Riak error ~p ~p", [Something, Stacktrace]),
 	    exit({error, Something});
 	{error, Reason} ->
 	    Stacktrace = erlang:get_stacktrace(),
-	    ?ERROR("[client ip ~p ] Riak error ~p ~p", [ClientIp, Reason, Stacktrace]),
+	    ?ERROR("Riak error ~p ~p", [Reason, Stacktrace]),
 	    exit({error, Reason})
     end.
     
@@ -170,6 +180,17 @@ inc_counter_fun(Pid, ClientIp, ClientPort, TargetIp, IncTraff) ->
 		   [ClientIp, Reason]),
 	    exit({riak_error, ClientIp, Reason})
     end.
+
+
+list_clients_fun(Pid) ->
+    case riak_get(Pid, ?ALL_CLIENTS_BUCKET, ?ALL_CLIENTS_KEY) of 
+	{ok, ValueObj} ->
+	    Sets = values(ValueObj), %% get values of object. it is list anyway
+	    MergedSet = merge_sets(Sets),
+	    {ok, gb_sets:to_list(MergedSet)};
+	Error ->
+	    Error
+    end.     
 		
 %% @hidden 
 %% count traffic from all targets 
@@ -178,9 +199,9 @@ count_fun(Pid, ClientIp) ->
     case riak_get(Pid, BinClientIp, ?TARGETS_IN_CLIENT_BUCKET) of 
 	{ok, ValueObj} ->
 	    Sets = values(ValueObj), %% get values of object. it is list anyway
-	    BinMergedSet = merge_sets(Sets),
-	    CountedTraff = count_targets(Pid, BinClientIp, BinMergedSet),
-	    {ok, {ClientIp, CountedTraff}};
+	    MergedSet = merge_sets(Sets),
+	    CountedTraff = count_targets(Pid, BinClientIp, MergedSet),
+	    {ok, CountedTraff};
 	Error ->
 	    Error
     end. 
@@ -363,7 +384,7 @@ riak_put(Pid, Object) ->
    end.
 
 riak_get(Pid, Bucket, Key) ->
-    riakc_pb_socket:get(Pid, Bucket, Key).
+    riakc_pb_socket:get(Pid, Bucket, Key, [{r, ?R}]).
 
 
 ip_to_bucket(ClientIp) ->

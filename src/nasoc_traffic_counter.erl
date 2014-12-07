@@ -32,7 +32,8 @@
 -export([target/2, 
 	 inc_counter/2,
 	 export_to_file/2,
-	 export/1]).
+	 export/1,
+	 list_clients/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -40,7 +41,7 @@
 
 -define(SERVER, ?MODULE). 
 
--define(COUNTER, nasoc_riak_stat).
+-define(COUNTER, nasoc_riak_stat_crdt).
 
 -record(state, {
 	  %% monitor reference of connection hadnler
@@ -117,7 +118,7 @@ inc_counter(Pid, MsgSize) ->
 %%--------------------------------------------------------------------------------
 export_to_file(ClientIp, FileName) ->
     case ?COUNTER:count(ClientIp) of 
-	{ok, TrafficCounter} -> save_to_file(TrafficCounter, FileName);
+	{ok, TrafficCounter} -> save_to_file(ClientIp, TrafficCounter, FileName);
 	{error, _Reason} = Error -> Error
     end.
 
@@ -132,7 +133,22 @@ export_to_file(ClientIp, FileName) ->
 %% @end
 %%--------------------------------------------------------------------------------
 export(ClientIp) ->
-    ?COUNTER:count(ClientIp).
+    case ?COUNTER:count(ClientIp) of 
+	{ok, CountedTraff} -> {ok, {ClientIp, CountedTraff}};
+	Error -> Error
+    end.
+				
+
+%%--------------------------------------------------------------------------------
+-spec list_clients() -> {ok, [client_ip()]} | {error, notfound}.
+%%--------------------------------------------------------------------------------
+%% @doc 
+%%   List call clients connected to proxy ever.
+%%   Raise exception if riak error happened (except not found)
+%% @end
+%%--------------------------------------------------------------------------------
+list_clients() ->
+    ?COUNTER:list_clients().
 
 %%%===============================================================================
 %%% GEN_SERVER CALLBACKS
@@ -193,7 +209,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @hidden
 %%  Open file and start writting
-save_to_file({ClientIp, TrafficCounters}, FileName) ->
+save_to_file(ClientIp, TrafficCounters, FileName) ->
     case file:open(FileName, [exclusive, write]) of 
 	{ok, Fd} ->
 	    write_to_file(Fd, FileName, ClientIp, TrafficCounters);
