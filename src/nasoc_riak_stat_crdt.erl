@@ -3,7 +3,7 @@
 %%% @copyright (C) 2014
 %%% @doc
 %%%     Proxy statistic implementation using riak CRDT feature with
-%%%     automatically 
+%%%     automatically, Execute create_riak_crdt.sh fristly
 %%% @end
 %%%-------------------------------------------------------------------
 -module(nasoc_riak_stat_crdt).
@@ -22,10 +22,29 @@
 %%% Key where stored set of all targets for client
 -define(TARGETS_IN_CLIENT_BUCKET, <<"nasoc_app_crdt_client_to_target_map_bkt">>).
 
--define(TARGETS_IN_CLIENT_KEY, <<"nasoc_app_crdt_client_to_target_map_key">>).
-
 -define(MAP, <<"nasoc_crdt_maps">>).
 -define(SET, <<"nasoc_crdt_sets">>).
+
+
+%%%-----------------------------------------------------------------------------
+%%% Statistic storage in riak based on CRDT features.
+%%%
+%%% BUCKET ->
+%%%     KEY ->
+%%%         TYPE:ELEM
+%%%
+%%% SCHEMA
+%%% 
+%%% Here stored set of all client ips which connected to socks proxy
+%%% ?ALL_CLIENTS_BUCKET ->
+%%%     ?ALL_CLIENTS_KEY ->
+%%%          SET:client_ip()   
+%%%
+%%% ?TARGETS_IN_CLIENT_BUCKET ->
+%%%     client_ip_bin() ->
+%%%          MAP: key - target_ip_bin(), value - non_neg_integer() - number of bytes
+%%%                                                   received from target
+%%%-------------------------------------------------------------------------------
 
 %%%===============================================================================
 %%% API
